@@ -96,7 +96,7 @@ def cnj(message):
         ok, duration = redeem_membership(message.from_user.id, message.from_user.username, parts[1])
         if ok: 
             vip_cache.pop(message.from_user.id, None)
-            bot.reply_to(message, f"✅ <b>VIP de {duration} días canjeado!</b>", parse_mode="HTML")
+            bot.reply_to(message, f"✅ <b>Felicidades!</b>\nHas canjeado un pase VIP de <b>{duration} días</b>.", parse_mode="HTML")
         else: bot.reply_to(message, "❌ Clave inválida.")
     except: bot.reply_to(message, "❌ Error.")
 
@@ -125,12 +125,21 @@ def callback_master(call):
                 u_name = html.escape(call.from_user.username or "Usuario")
                 msg = (
                     "••••••••••••••••••••••••••••••••••••••••••••••••••••••••••\n"
-                    f"KEY {{ {c} }} Generada por @{u_name}\n"
-                    "⚠️ Vence en 4 horas ⚠️\n"
+                    f"KEY {{ {c} }} DE @{u_name} con ID: {uid}\n"
+                    "⚠️ VENCE EN 4 HORAS O AL SER USADA ⚠️\n"
                     "••••••••••••••••••••••••••••••••••••••••••••••••••••••••••\n"
-                    f"🗝️ <code>{k}</code> 🗝️\n\n"
-                    f"🛡️ 𝙸𝚗𝚜𝚝𝚊𝚕𝚊𝚍𝚘𝚛 𝙾𝚏𝚒𝚌𝚒𝚊𝚕 🔐\n"
+                    f"🛡️ SloganKEY 🛡️ : Klk {u_name}\n"
+                    "••••••••••••••••••••••••••••••••••••••••••••••••••••••••••\n"
+                    f"🗝️ <code>{k}</code> 🗝️\n"
+                    "•••••••••••••\n"
+                    f"🛡️ 𝙸𝚗𝚜𝚝𝚊𝚕𝚊𝚍𝚘𝚛 𝙾𝚏𝚒𝚌𝚒𝚊𝚕 {VERSION} 🔐\n"
+                    "••••••••••••••••••••••••••••••••••••••••••••••••••••••••••\n"
                     f"<code>{INSTALL_CMD}</code>\n"
+                    "••••••••••••••••••••••••••••••••••••••••••••••••••••••••••\n"
+                    "𝙍𝙚𝙘𝙤𝙢𝙚𝙣𝙙𝙖𝙙𝙤 𝙐𝙗𝙪𝙣𝙩𝙪 20.04 LTS\n"
+                    "🧬🧬 S.O Ubuntu 18.04 a 24.04 X64 🧬🧬\n"
+                    "Debian 8 a 12 (x64)\n"
+                    "🪦 ACCESOS OFICIALES CON @underkraker\n"
                     "••••••••••••••••••••••••••••••••••••••••••••••••••••••••••"
                 )
                 bot.send_message(chat_id, msg, parse_mode="HTML")
@@ -160,7 +169,7 @@ def callback_master(call):
 def step_p_admin_1(m):
     try:
         duration = int(m.text); key = add_membership_key(duration)
-        bot.send_message(m.chat.id, f"🎟️ <b>VIP KEY CREADA:</b> <code>{key}</code>", parse_mode="HTML")
+        bot.send_message(m.chat.id, f"✅ <b>PASE VIP CREADO:</b>\n🔑 <code>{key}</code>\n⏳ Duración: {duration} días.\nCanjear con: <code>/canjear {key}</code>", parse_mode="HTML")
     except: bot.send_message(m.chat.id, "❌ Error.")
 
 @bot.message_handler(func=lambda m: m.text and m.text.startswith(".cmd"))
