@@ -6,15 +6,13 @@ import string
 DB_FILE = 'bot_database.db'
 
 def get_conn():
-    # Cache compartida activada para máxima velocidad entre hilos
-    conn = sqlite3.connect(f"file:{DB_FILE}?cache=shared", uri=True, check_same_thread=False, timeout=20)
+    # Conexión optimizada para el bot Lite
+    conn = sqlite3.connect(DB_FILE, check_same_thread=False, timeout=15)
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA journal_mode=WAL")
-    conn.execute("PRAGMA synchronous=NORMAL")
     return conn
 
 def execute_query(query, params=(), commit=False, fetchone=False, fetchall=False):
-    """Función maestra blindada contra bloqueos"""
     conn = get_conn()
     try:
         c = conn.cursor()
@@ -35,6 +33,7 @@ def init_db():
     conn = get_conn()
     try:
         c = conn.cursor()
+        # Mantenemos las tablas mínimas para Keys y Membresías
         c.execute('''CREATE TABLE IF NOT EXISTS users (
                 tg_id INTEGER PRIMARY KEY, username TEXT, expiry_date INTEGER)''')
         c.execute('''CREATE TABLE IF NOT EXISTS membership_keys (
@@ -44,44 +43,11 @@ def init_db():
                 key_code TEXT, creator_id INTEGER, 
                 expiry_date INTEGER, used INTEGER DEFAULT 0, 
                 used_by_ip TEXT, used_at INTEGER)''')
-        c.execute('''CREATE TABLE IF NOT EXISTS tickets (
-                ticket_id INTEGER PRIMARY KEY AUTOINCREMENT, 
-                user_id INTEGER, message TEXT, status TEXT DEFAULT 'OPEN', created_at INTEGER)''')
-        c.execute('''CREATE TABLE IF NOT EXISTS vps_connections (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                owner_id INTEGER,
-                vps_name TEXT,
-                vps_ip TEXT,
-                vps_user TEXT,
-                vps_pass TEXT,
-                auth_type TEXT DEFAULT 'pass',
-                vps_key_content TEXT,
-                use_sudo INTEGER DEFAULT 0)''')
         conn.commit()
     finally:
         conn.close()
 
-# --- FUNCIONES DE VPS ---
-def add_vps(owner_id, name, ip, user, auth_type, auth_val, use_sudo=0):
-    if auth_type == 'pass':
-        return execute_query("INSERT INTO vps_connections (owner_id, vps_name, vps_ip, vps_user, vps_pass, auth_type, use_sudo) VALUES (?, ?, ?, ?, ?, ?, ?)",
-                             (owner_id, name, ip, user, auth_val, 'pass', use_sudo), commit=True)
-    else:
-        return execute_query("INSERT INTO vps_connections (owner_id, vps_name, vps_ip, vps_user, vps_key_content, auth_type, use_sudo) VALUES (?, ?, ?, ?, ?, ?, ?)",
-                             (owner_id, name, ip, user, auth_val, 'key', use_sudo), commit=True)
-
-def get_user_vps(owner_id):
-    rows = execute_query("SELECT * FROM vps_connections WHERE owner_id = ?", (owner_id,), fetchall=True)
-    return [dict(r) for r in rows] if rows else []
-
-def get_vps_by_id(vps_id):
-    row = execute_query("SELECT * FROM vps_connections WHERE id = ?", (vps_id,), fetchone=True)
-    return dict(row) if row else None
-
-def delete_vps(vps_id, owner_id):
-    return execute_query("DELETE FROM vps_connections WHERE id = ? AND owner_id = ?", (vps_id, owner_id), commit=True)
-
-# --- FUNCIONES AUXILIARES ---
+# --- FUNCIONES DE MEMBRESÍA Y KEYS ---
 def generate_random_string(length=12):
     return ''.join(random.choices(string.ascii_uppercase + string.digits, k=length))
 
@@ -150,14 +116,6 @@ def validate_and_burn_install_key(key, ip):
     finally:
         conn.close()
 
-def get_active_vps_ips(creator_id=None):
-    if creator_id:
-        rows = execute_query("SELECT DISTINCT i.used_by_ip, u.username FROM install_keys i LEFT JOIN users u ON i.creator_id = u.tg_id WHERE i.creator_id = ? AND i.used = 1 AND i.used_by_ip IS NOT NULL", (creator_id,), fetchall=True)
-    else:
-        rows = execute_query("SELECT DISTINCT i.used_by_ip, u.username FROM install_keys i LEFT JOIN users u ON i.creator_id = u.tg_id WHERE i.used = 1 AND i.used_by_ip IS NOT NULL", (), fetchall=True)
+def get_active_vps_ips():
+    rows = execute_query("SELECT DISTINCT i.used_by_ip, u.username FROM install_keys i LEFT JOIN users u ON i.creator_id = u.tg_id WHERE i.used = 1 AND i.used_by_ip IS NOT NULL", (), fetchall=True)
     return [{"ip": r["used_by_ip"], "username": r["username"] if r["username"] else "Desconocido"} for r in rows] if rows else []
-
-def get_expiring_users(days_left=2):
-    limit = int(time.time()) + (days_left * 86400)
-    rows = execute_query("SELECT tg_id, username, expiry_date FROM users WHERE expiry_date > ? AND expiry_date < ?", (int(time.time()), limit), fetchall=True)
-    return [dict(r) for r in rows] if rows else []
