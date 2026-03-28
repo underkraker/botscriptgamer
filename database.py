@@ -8,6 +8,8 @@ DB_FILE = 'bot_database.db'
 def get_conn():
     conn = sqlite3.connect(DB_FILE, check_same_thread=False)
     conn.row_factory = sqlite3.Row
+    # Modo WAL para permitir lecturas y escrituras simultáneas sin bloqueos
+    conn.execute("PRAGMA journal_mode=WAL")
     return conn
 
 def init_db():
