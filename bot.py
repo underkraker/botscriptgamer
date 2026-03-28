@@ -14,13 +14,19 @@ from concurrent.futures import ThreadPoolExecutor
 from database import init_db, can_user_generate, generate_install_key, validate_and_burn_install_key, add_membership_key, redeem_membership, get_user, get_active_vps_ips, get_expiring_users, create_ticket, add_vps, get_user_vps, get_vps_by_id, delete_vps
 from config import TOKEN, ADMIN_ID, VERSION, INSTALL_CMD, API_KEY
 
-VERSION = "v10.1 Master Stability Edition 🔐"
+VERSION = "v10.2 Master Shield Edition 🔐"
 bot = telebot.TeleBot(TOKEN)
 app = Flask(__name__)
 
 # --- CONFIGURACIÓN DE CONCURRENCIA ---
-executor = ThreadPoolExecutor(max_workers=20)
-user_locks = {} # Prevención de duplicados
+executor = ThreadPoolExecutor(max_workers=30)
+user_locks = {} # Prevención de duplicados (Debounce)
+
+def is_locked(uid, duration=4):
+    now = time.time()
+    if uid in user_locks and now - user_locks[uid] < duration: return True
+    user_locks[uid] = now
+    return False
 
 # --- MEMORIA VOLATIL ---
 temp_vps = {}
@@ -82,18 +88,9 @@ def ssh_execute_master(vps, cmd_list):
         return True, out, err
     except Exception as e: return False, "", str(e)
 
-# --- UTILS ---
-def is_locked(uid):
-    now = time.time()
-    if uid in user_locks and now - user_locks[uid] < 5: return True
-    user_locks[uid] = now
-    return False
-
-# --- BOT HANDLERS ---
-@bot.message_handler(commands=['start', 'menu'])
-@bot.message_handler(func=lambda m: m.text and m.text.lower() in [".menu", ".start"])
-def send_welcome(message):
-    uid = message.from_user.id; is_vip = can_user_generate(uid) or uid == ADMIN_ID
+# --- BOT HELPERS (NUEVOS) ---
+def get_main_markup(uid):
+    is_vip = can_user_generate(uid) or uid == ADMIN_ID
     markup = InlineKeyboardMarkup()
     if is_vip:
         markup.row(InlineKeyboardButton("🖥️ GESTIONAR VPS", callback_data="vps_list"))
@@ -101,7 +98,10 @@ def send_welcome(message):
     markup.row(InlineKeyboardButton("👤 MI PERFIL", callback_data="btn_perfil"))
     markup.row(InlineKeyboardButton("📚 GUÍAS", callback_data="btn_guias"), InlineKeyboardButton("🛠️ SOPORTE", callback_data="btn_soporte"))
     if uid == ADMIN_ID: markup.row(InlineKeyboardButton("🎟️ CREAR MEMBRESIA VIP", callback_data="btn_p_admin"))
-    
+    return markup
+
+def send_main_menu(message, uid, edit=False):
+    markup = get_main_markup(uid)
     msg = (
         "<b>🔥 MAESTRO UNDERKRAKER 🔥</b>\n"
         f"🚀 Version: <code>{VERSION}</code>\n"
@@ -109,25 +109,35 @@ def send_welcome(message):
         "Bienvenido al Centro de Mando Gamer Master.\n"
         "Gestiona tus servidores y licencias con un click."
     )
-    bot.reply_to(message, msg, reply_markup=markup, parse_mode="HTML")
+    if edit:
+        try: bot.edit_message_text(msg, message.chat.id, message.message_id, reply_markup=markup, parse_mode="HTML")
+        except: bot.send_message(message.chat.id, msg, reply_markup=markup, parse_mode="HTML")
+    else:
+        bot.send_message(message.chat.id, msg, reply_markup=markup, parse_mode="HTML")
+
+# --- BOT HANDLERS ---
+@bot.message_handler(commands=['start', 'menu'])
+@bot.message_handler(func=lambda m: m.text and m.text.lower() in [".menu", ".start"])
+def cmd_start(message):
+    send_main_menu(message, message.from_user.id)
 
 @bot.message_handler(commands=['canjear'])
 def cnj(message):
     try:
         parts = message.text.split()
-        if len(parts) < 2: raise Exception()
+        if len(parts) < 2: return bot.reply_to(message, "❌ Uso: <code>/canjear CLAVE-AQUI</code>", parse_mode="HTML")
         key = parts[1]
         ok, duration = redeem_membership(message.from_user.id, message.from_user.username, key)
         if ok: bot.reply_to(message, f"✅ <b>Felicidades!</b>\nHas canjeado un pase VIP de <b>{duration} días</b>.", parse_mode="HTML")
         else: bot.reply_to(message, "❌ Key inválida o ya canjeada.")
-    except: bot.reply_to(message, "❌ Uso: <code>/canjear CLAVE-AQUI</code>", parse_mode="HTML")
+    except Exception as e: bot.reply_to(message, f"❌ Error: {str(e)}")
 
 @bot.callback_query_handler(func=lambda call: True)
 def callback_master(call):
     uid = call.from_user.id; data = call.data
     chat_id = call.message.chat.id; msg_id = call.message.message_id
     
-    # Respuesta inmediata para evitar el spinner de Telegram
+    # Respuesta inmediata para UX
     try: bot.answer_callback_query(call.id)
     except: pass
 
@@ -136,7 +146,7 @@ def callback_master(call):
         vps_list = get_user_vps(uid)
         markup = InlineKeyboardMarkup()
         for v in vps_list: markup.row(InlineKeyboardButton(f"🌐 {v['vps_name']} ({v['vps_ip']})", callback_data=f"v_view_{v['id']}"))
-        markup.row(InlineKeyboardButton("➕ AÑADIR VPS", callback_data="v_add_template"), InlineKeyboardButton("🔙 BACK", callback_data="back"))
+        markup.row(InlineKeyboardButton("➕ AÑADIR VPS", callback_data="v_add_template"), InlineKeyboardButton("🔙 REGRESAR", callback_data="back"))
         bot.edit_message_text("🖥️ <b>TUS SERVIDORES:</b>", chat_id, msg_id, reply_markup=markup, parse_mode="HTML")
     
     elif data.startswith("v_view_"):
@@ -153,16 +163,20 @@ def callback_master(call):
     elif data.startswith("v_lu_"):
         if is_locked(uid): return
         vid = data.split("_")[2]; v = get_vps_by_id(vid)
-        bot.send_message(chat_id, "⏳ <b>Consultando VPS...</b>", parse_mode="HTML")
+        info = bot.send_message(chat_id, "⏳ <b>Consultando usuarios en el VPS...</b>", parse_mode="HTML")
         def run_lu():
-            ok, out, err = ssh_execute_master(v, ["ls /etc/gaming_vps/*.limit"])
-            if ok:
-                users = [f.split("/")[-1].replace(".limit", "") for f in out.split() if ".limit" in f]
-                markup = InlineKeyboardMarkup()
-                for u in users: markup.row(InlineKeyboardButton(f"👤 {u}", callback_data=f"u_opt_{vid}_{u}"))
-                markup.row(InlineKeyboardButton("🔙 VOLVER", callback_data=f"v_view_{vid}"))
-                bot.send_message(chat_id, f"👥 <b>CLIENTES EN {v['vps_name']}:</b>", reply_markup=markup, parse_mode="HTML")
-            else: bot.send_message(chat_id, f"❌ Error SSH: <code>{html.escape(err)}</code>", parse_mode="HTML")
+            try:
+                ok, out, err = ssh_execute_master(v, ["ls /etc/gaming_vps/*.limit"])
+                if ok:
+                    users = [f.split("/")[-1].replace(".limit", "") for f in out.split() if ".limit" in f]
+                    markup = InlineKeyboardMarkup()
+                    for u in users: markup.row(InlineKeyboardButton(f"👤 {u}", callback_data=f"u_opt_{vid}_{u}"))
+                    markup.row(InlineKeyboardButton("🔙 VOLVER", callback_data=f"v_view_{vid}"))
+                    bot.edit_message_text(f"👥 <b>CLIENTES EN {v['vps_name']}:</b>", chat_id, info.message_id, reply_markup=markup, parse_mode="HTML")
+                else: 
+                    bot.edit_message_text(f"❌ Error SSH: <code>{html.escape(err)}</code>", chat_id, info.message_id, parse_mode="HTML")
+            except Exception as e:
+                bot.send_message(chat_id, f"⚠️ Error inesperado: {str(e)}")
         executor.submit(run_lu)
 
     elif data.startswith("u_opt_"):
@@ -175,10 +189,16 @@ def callback_master(call):
     elif data.startswith("u_del_"):
         if is_locked(uid): return
         parts = data.split("_"); vid = parts[2]; user = parts[3]; v = get_vps_by_id(vid)
-        bot.send_message(chat_id, f"⏳ <b>Eliminando usuario {user}...</b>", parse_mode="HTML")
+        info = bot.send_message(chat_id, f"⏳ <b>Borrando a {user}...</b>", parse_mode="HTML")
         def run_del():
-            ok, out, err = ssh_execute_master(v, [f"userdel -f {user}", f"rm -f /etc/gaming_vps/{user}.limit"])
-            bot.send_message(chat_id, f"✅ Usuario <code>{user}</code> eliminado de la VPS.", parse_mode="HTML")
+            try:
+                ok, out, err = ssh_execute_master(v, [f"userdel -f {user}", f"rm -f /etc/gaming_vps/{user}.limit"])
+                bot.edit_message_text(f"✅ Usuario <code>{user}</code> eliminado con éxito.", chat_id, info.message_id, parse_mode="HTML")
+                # Botón para volver
+                markup = InlineKeyboardMarkup().row(InlineKeyboardButton("🔙 VOLVER A LISTA", callback_data=f"v_lu_{vid}"))
+                bot.edit_message_reply_markup(chat_id, info.message_id, reply_markup=markup)
+            except Exception as e:
+                bot.send_message(chat_id, f"❌ Error en borrado: {str(e)}")
         executor.submit(run_del)
 
     elif data == "btn_perfil":
@@ -246,114 +266,118 @@ def callback_master(call):
     
     elif data.startswith("v_del_"):
         delete_vps(data.split("_")[2], uid)
-        bot.send_message(chat_id, "✅ VPS eliminada.")
-        send_welcome(call.message)
+        bot.send_message(chat_id, "✅ VPS eliminada con éxito.")
+        send_main_menu(call.message, uid, edit=True)
     
-    elif data == "back": send_welcome(call.message)
+    elif data == "back": 
+        send_main_menu(call.message, uid, edit=True)
     
     elif data.startswith("v_cu_"):
         temp_creation[uid] = {"vid": data.split("_")[2]}
-        msg = bot.send_message(chat_id, "👤 <b>User:</b>", parse_mode="HTML"); bot.register_next_step_handler(msg, cu_step1)
+        msg = bot.send_message(chat_id, "👤 <b>Nombre de usuario SSH:</b>", parse_mode="HTML"); bot.register_next_step_handler(msg, cu_step1)
 
-# --- STEPS (HTML SAFE) ---
+# --- STEPS (HARDENED) ---
 def step_p_admin_1(m):
     try:
         duration = int(m.text); key = add_membership_key(duration)
         bot.send_message(m.chat.id, f"✅ <b>PASE VIP CREADO:</b>\n🔑 <code>{key}</code>\n⏳ Duración: {duration} días.\nCanjear con: <code>/canjear {key}</code>", parse_mode="HTML")
     except: bot.send_message(m.chat.id, "❌ Duración inválida.")
 
-def cu_step1(m): temp_creation[m.from_user.id]["un"] = m.text; msg = bot.send_message(m.chat.id, "🔑 <b>Pass:</b>", parse_mode="HTML"); bot.register_next_step_handler(msg, cu_step2)
-def cu_step2(m): temp_creation[m.from_user.id]["pw"] = m.text; msg = bot.send_message(m.chat.id, "📅 <b>Días:</b>", parse_mode="HTML"); bot.register_next_step_handler(msg, cu_step3)
+def cu_step1(m): temp_creation[m.from_user.id]["un"] = m.text; msg = bot.send_message(m.chat.id, "🔐 <b>Contraseña para el usuario:</b>", parse_mode="HTML"); bot.register_next_step_handler(msg, cu_step2)
+def cu_step2(m): temp_creation[m.from_user.id]["pw"] = m.text; msg = bot.send_message(m.chat.id, "📅 <b>Días de duración:</b>", parse_mode="HTML"); bot.register_next_step_handler(msg, cu_step3)
 def cu_step3(m): 
     try:
         temp_creation[m.from_user.id]["ds"] = int(m.text)
-        msg = bot.send_message(m.chat.id, "🔄 <b>Límite de Conexiones:</b>", parse_mode="HTML")
+        msg = bot.send_message(m.chat.id, "🔄 <b>Límite de conexiones simultáneas:</b>", parse_mode="HTML")
         bot.register_next_step_handler(msg, cu_final)
-    except: bot.send_message(m.chat.id, "❌ Error: Pon un número."); send_welcome(m)
+    except: bot.send_message(m.chat.id, "❌ Error: Debe ser un número."); send_main_menu(m, m.from_user.id)
 
 def cu_final(m):
-    if is_locked(m.from_user.id): return
+    uid = m.from_user.id
+    if is_locked(uid): return
     try:
-        limit = int(m.text); uid = m.from_user.id; data = temp_creation.get(uid)
+        limit = int(m.text); data = temp_creation.get(uid)
         if not data: return
         v = get_vps_by_id(data['vid']); pre = "sudo " if v['use_sudo'] else ""
-        bot.send_message(m.chat.id, "⏳ <b>Configurando usuario en la VPS...</b>", parse_mode="HTML")
+        info = bot.send_message(m.chat.id, "⏳ <b>Configurando usuario en la VPS remota...</b>", parse_mode="HTML")
         
         def run_cu():
-            cmds = [
-                f"grep -q '/bin/false' /etc/shells || echo '/bin/false' | {pre}tee -a /etc/shells",
-                f"useradd -e $(date -d '{data['ds']} days' +%Y-%m-%d) -s /bin/false -M {data['un']}",
-                f"echo '{data['un']}:{data['pw']}' | chpasswd",
-                f"mkdir -p /etc/gaming_vps",
-                f"echo '{limit}' | tee /etc/gaming_vps/{data['un']}.limit",
-                f"sed -i 's/#PasswordAuthentication yes/PasswordAuthentication yes/g' /etc/ssh/sshd_config",
-                f"systemctl restart sshd 2>/dev/null", f"systemctl restart dropbear 2>/dev/null"
-            ]
-            ok, out, err = ssh_execute_master(v, cmds)
-            if ok: bot.send_message(m.chat.id, f"✅ <b>CLIENTE CREADO!</b>\nUser: <code>{data['un']}</code>\nPass: <code>{data['pw']}</code>\nLímite: <code>{limit}</code>", parse_mode="HTML")
-            else: bot.send_message(m.chat.id, f"❌ Error: <code>{html.escape(err)}</code>", parse_mode="HTML")
+            try:
+                cmds = [
+                    f"grep -q '/bin/false' /etc/shells || echo '/bin/false' | {pre}tee -a /etc/shells",
+                    f"useradd -e $(date -d '{data['ds']} days' +%Y-%m-%d) -s /bin/false -M {data['un']}",
+                    f"echo '{data['un']}:{data['pw']}' | chpasswd",
+                    f"mkdir -p /etc/gaming_vps",
+                    f"echo '{limit}' | tee /etc/gaming_vps/{data['un']}.limit",
+                    f"sed -i 's/#PasswordAuthentication yes/PasswordAuthentication yes/g' /etc/ssh/sshd_config",
+                    f"systemctl restart sshd 2>/dev/null", f"systemctl restart dropbear 2>/dev/null"
+                ]
+                ok, out, err = ssh_execute_master(v, cmds)
+                if ok: 
+                    bot.edit_message_text(f"✅ <b>CLIENTE CREADO!</b>\nUser: <code>{data['un']}</code>\nPass: <code>{data['pw']}</code>\nLímite: <code>{limit}</code>", m.chat.id, info.message_id, parse_mode="HTML")
+                else: 
+                    bot.edit_message_text(f"❌ Error crítico en VPS: <code>{html.escape(err)}</code>", m.chat.id, info.message_id, parse_mode="HTML")
+            except Exception as ex:
+                bot.send_message(m.chat.id, f"⚠️ Error en ejecución SSH: {str(ex)}")
         executor.submit(run_cu)
-    except: bot.send_message(m.chat.id, "❌ Límite inválido."); send_welcome(m)
+    except: bot.send_message(m.chat.id, "❌ Límite inválido."); send_main_menu(m, uid)
 
-def v_step1_name(m): temp_vps[m.from_user.id]["n"] = m.text; msg = bot.send_message(m.chat.id, "🌐 <b>IP:</b>", parse_mode="HTML"); bot.register_next_step_handler(msg, v_step2_ip)
+def v_step1_name(m): temp_vps[m.from_user.id]["n"] = m.text; msg = bot.send_message(m.chat.id, "🌐 <b>IP del VPS:</b>", parse_mode="HTML"); bot.register_next_step_handler(msg, v_step2_ip)
 def v_step2_ip(m):
     uid = m.from_user.id; temp_vps[uid]["i"] = m.text; tpl = temp_vps[uid]["template"]
     if tpl in ["aws", "ora"]:
         temp_vps[uid]["u"] = "ubuntu"; temp_vps[uid]["auth_type"] = "key"
-        bot.send_message(m.chat.id, "📂 <b>Sube archivo .pem:</b>", parse_mode="HTML")
+        bot.send_message(m.chat.id, "📂 <b>Por favor, sube el archivo .pem (Llave SSH):</b>", parse_mode="HTML")
     elif tpl == "root":
         temp_vps[uid]["u"] = "root"; temp_vps[uid]["auth_type"] = "pass"
-        msg = bot.send_message(m.chat.id, "🔑 <b>Root Pass:</b>", parse_mode="HTML"); bot.register_next_step_handler(msg, v_step_pass_direct)
+        msg = bot.send_message(m.chat.id, "🔑 <b>Contraseña Root:</b>", parse_mode="HTML"); bot.register_next_step_handler(msg, v_step_pass_direct)
     else:
-        msg = bot.send_message(m.chat.id, "👤 <b>User:</b>", parse_mode="HTML"); bot.register_next_step_handler(msg, v_step_user_manual)
+        msg = bot.send_message(m.chat.id, "👤 <b>Nombre de usuario SSH:</b>", parse_mode="HTML"); bot.register_next_step_handler(msg, v_step_user_manual)
 
-def v_step_user_manual(m): temp_vps[m.from_user.id]["u"] = m.text; msg = bot.send_message(m.chat.id, "🔑 <b>Pass:</b>", parse_mode="HTML"); bot.register_next_step_handler(msg, v_step_pass_direct)
+def v_step_user_manual(m): temp_vps[m.from_user.id]["u"] = m.text; msg = bot.send_message(m.chat.id, "🔑 <b>Contraseña SSH:</b>", parse_mode="HTML"); bot.register_next_step_handler(msg, v_step_pass_direct)
 
 @bot.message_handler(content_types=['document'])
 def handle_ssh_final(message):
     uid = message.from_user.id
     if uid in temp_vps and temp_vps[uid].get("auth_type") == "key":
-        f = bot.download_file(bot.get_file(message.document.file_id).file_path)
-        temp_vps[uid]["val"] = f.decode('utf-8')
-        sudo_val = 1 if temp_vps[uid].get("template") in ["aws", "ora"] else 0
-        add_vps(uid, temp_vps[uid]['n'], temp_vps[uid]['i'], temp_vps[uid]['u'], 'key', temp_vps[uid]['val'], sudo_val)
-        bot.send_message(message.chat.id, "✅ <b>VPS Registrada correctamente con llave.</b>", parse_mode="HTML")
-        send_welcome(message)
+        try:
+            f = bot.download_file(bot.get_file(message.document.file_id).file_path)
+            temp_vps[uid]["val"] = f.decode('utf-8')
+            sudo_val = 1 if temp_vps[uid].get("template") in ["aws", "ora"] else 0
+            add_vps(uid, temp_vps[uid]['n'], temp_vps[uid]['i'], temp_vps[uid]['u'], 'key', temp_vps[uid]['val'], sudo_val)
+            bot.send_message(message.chat.id, "✅ <b>VPS Registrada correctamente.</b>", parse_mode="HTML")
+            send_main_menu(message, uid)
+        except Exception as e:
+            bot.send_message(message.chat.id, f"❌ Error leyendo archivo: {str(e)}")
 
 def v_step_pass_direct(m): 
     uid = m.from_user.id; d = temp_vps.get(uid)
     if not d: return
-    add_vps(uid, d['n'], d['i'], d['u'], 'pass', m.text, 0)
-    bot.send_message(m.chat.id, "✅ <b>VPS Registrada correctamente con contraseña.</b>", parse_mode="HTML")
-    send_welcome(m)
+    try:
+        add_vps(uid, d['n'], d['i'], d['u'], 'pass', m.text, 0)
+        bot.send_message(m.chat.id, "✅ <b>VPS Registrada correctamente con contraseña.</b>", parse_mode="HTML")
+        send_main_menu(m, uid)
+    except Exception as e: bot.send_message(m.chat.id, f"❌ Error DB: {str(e)}")
 
-# --- COMANDO .CMD (HTML SAFE) ---
+# --- COMANDO .CMD (HARDENED) ---
 @bot.message_handler(func=lambda m: m.text and m.text.startswith(".cmd"))
 def handle_cmd_raw(m):
     uid = m.from_user.id
-    if uid != ADMIN_ID:
-        bot.reply_to(m, "🚫 <b>Acceso denegado.</b>", parse_mode="HTML")
-        return
-    
+    if uid != ADMIN_ID: return bot.reply_to(m, "🚫 <b>Acceso denegado.</b>", parse_mode="HTML")
     cmd = m.text[5:].strip()
-    if not cmd:
-        bot.reply_to(m, "🔑 <b>Uso:</b> <code>.cmd COMANDO</code>", parse_mode="HTML")
-        return
-        
-    try:
-        p = subprocess.Popen(cmd, shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-        out, err = p.communicate()
-        res = (out.decode() + err.decode()).strip()
-        if not res: res = "✅ Comando ejecutado (Sin salida)."
-        
-        if len(res) > 3800:
-            f = io.BytesIO(res.encode())
-            f.name = "output.txt"
-            bot.send_document(m.chat.id, f, caption="📄 Salida demasiado larga.")
-        else:
-            bot.reply_to(m, f"💻 <b>SHELL:</b>\n<pre>{html.escape(res)}</pre>", parse_mode="HTML")
-    except Exception as e:
-        bot.reply_to(m, f"❌ Error: <code>{html.escape(str(e))}</code>", parse_mode="HTML")
+    if not cmd: return bot.reply_to(m, "🔑 <b>Uso:</b> <code>.cmd COMANDO</code>", parse_mode="HTML")
+    def run_raw():
+        try:
+            p = subprocess.Popen(cmd, shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+            out, err = p.communicate()
+            res = (out.decode() + err.decode()).strip()
+            if not res: res = "✅ Ejecución exitosa (sin salida)."
+            if len(res) > 3800:
+                f = io.BytesIO(res.encode()); f.name = "output.txt"
+                bot.send_document(m.chat.id, f, caption="📄 Salida completa.")
+            else: bot.reply_to(m, f"💻 <b>SHELL:</b>\n<pre>{html.escape(res)}</pre>", parse_mode="HTML")
+        except Exception as e: bot.reply_to(m, f"❌ Error: {str(e)}")
+    executor.submit(run_raw)
 
 if __name__ == '__main__':
     init_db()
@@ -362,7 +386,7 @@ if __name__ == '__main__':
     
     while True:
         try:
-            bot.polling(non_stop=True, interval=1, timeout=30)
+            bot.polling(non_stop=True, interval=1, timeout=40)
         except Exception as e:
-            print(f"Polling Error: {e}")
+            print(f"Polling Crash Recovery: {e}")
             time.sleep(5)
