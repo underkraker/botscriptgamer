@@ -6,16 +6,15 @@ import string
 DB_FILE = 'bot_database.db'
 
 def get_conn():
-    # Reintentos automáticos para evitar el error "Database is locked" bajo carga extrema
-    conn = sqlite3.connect(DB_FILE, check_same_thread=False, timeout=10)
+    # Cache compartida activada para máxima velocidad entre hilos
+    conn = sqlite3.connect(f"file:{DB_FILE}?cache=shared", uri=True, check_same_thread=False, timeout=20)
     conn.row_factory = sqlite3.Row
-    # Modo WAL (Write-Ahead Logging) para permitir lecturas concurrentes sin esperas
     conn.execute("PRAGMA journal_mode=WAL")
-    conn.execute("PRAGMA synchronous=NORMAL") # Optimización de escritura para VPS
+    conn.execute("PRAGMA synchronous=NORMAL")
     return conn
 
 def execute_query(query, params=(), commit=False, fetchone=False, fetchall=False):
-    """Función maestra para ejecutar queries con manejo de errores y cierre automático"""
+    """Función maestra blindada contra bloqueos"""
     conn = get_conn()
     try:
         c = conn.cursor()
