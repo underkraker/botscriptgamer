@@ -94,6 +94,7 @@ def send_main_menu(chat_id, message_id, uid, edit=True):
 # --- BOT HANDLERS ---
 @bot.message_handler(commands=['start', 'menu'])
 def cmd_start(message):
+    print(f"📥 [BOT] Mensaje recibido: {message.text} de {message.from_user.id} (@{message.from_user.username})")
     send_main_menu(message.chat.id, message.message_id, message.from_user.id, edit=False)
 
 @bot.message_handler(commands=['canjear'])
