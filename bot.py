@@ -68,7 +68,7 @@ def validar_key():
     return jsonify({"status": "error", "msg": "invalid"}), 403
 
 def run_flask(): 
-    try: app.run(host='0.0.0.0', port=5000)
+    try: app.run(host='0.0.0.0', port=8080)
     except: pass
 
 # --- SISTEMA DE MENÚS LITE ---
