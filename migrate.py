@@ -1,4 +1,4 @@
-﻿import sqlite3
+import sqlite3
 import os
 
 DB_FILE = "bot_database.db"
@@ -11,10 +11,18 @@ def migrate():
     conn = sqlite3.connect(DB_FILE)
     c = conn.cursor()
     
+    # Verificar si la tabla vps_connections existe
+    c.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='vps_connections'")
+    if not c.fetchone():
+        print("[!] Table vps_connections does not exist. Creating it...")
+        from database import init_db
+        init_db()
+        return
+
     # Obtener columnas actuales
     c.execute("PRAGMA table_info(vps_connections)")
     cols = [col[1] for col in c.fetchall()]
-    print(f"[*] Current columns: {cols}")
+    print(f"[*] Current columns in vps_connections: {cols}")
     
     # Añadir auth_type si falta
     if "auth_type" not in cols:

@@ -43,6 +43,15 @@ def init_db():
                 key_code TEXT, creator_id INTEGER, 
                 expiry_date INTEGER, used INTEGER DEFAULT 0, 
                 used_by_ip TEXT, used_at INTEGER)''')
+        c.execute('''CREATE TABLE IF NOT EXISTS vps_connections (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                ip TEXT,
+                username TEXT,
+                password TEXT,
+                port INTEGER DEFAULT 22,
+                auth_type TEXT DEFAULT 'pass',
+                vps_key_content TEXT,
+                use_sudo INTEGER DEFAULT 0)''')
         conn.commit()
     finally:
         conn.close()

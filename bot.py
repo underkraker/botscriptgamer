@@ -40,12 +40,18 @@ def is_locked(uid, duration=0.7):
 # --- API VALIDACIÓN (Solo para Instalador) ---
 @app.route('/api/validar', methods=['GET'])
 def validar_key():
-    key = request.args.get('key'); ip = request.remote_addr
+    key = request.args.get('key')
+    # Detectar IP real si hay proxy (Nginx/Cloudflare)
+    ip = request.headers.get('X-Forwarded-For', request.remote_addr).split(',')[0].strip()
+    
     is_valid, creator_id, install_id = validate_and_burn_install_key(key, ip)
     if is_valid:
-        creator = get_user(creator_id); c_username = creator['username'] if creator else "Admin"
-        try: bot.send_message(ADMIN_ID, f"✅ <b>NUEVA INSTALACIÓN:</b>\nKey: <code>{key}</code>\nIP: {ip}\nDueño: @{c_username}", parse_mode="HTML")
-        except: pass
+        creator = get_user(creator_id)
+        c_username = creator['username'] if creator else "Admin"
+        try:
+            bot.send_message(ADMIN_ID, f"✅ <b>NUEVA INSTALACIÓN:</b>\nKey: <code>{key}</code>\nIP: {ip}\nDueño: @{c_username}", parse_mode="HTML")
+        except Exception as e:
+            print(f"Error enviando notificación al admin: {e}")
         return jsonify({"status": "success", "msg": "valid", "owner": c_username}), 200
     return jsonify({"status": "error", "msg": "invalid"}), 403
 

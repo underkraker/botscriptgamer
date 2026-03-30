@@ -1,0 +1,8 @@
+# CONFIGURACIÓN DEL BOT KRAKER MASTER
+# Copia este archivo como config.py y rellena los datos
+
+TOKEN = "TU_TELEGRAM_BOT_TOKEN"
+ADMIN_ID = 12345678  # Tu ID de Telegram (puedes obtenerlo de @userinfobot)
+VERSION = "v13.0 Master Shield 🛡️"
+INSTALL_CMD = "bash <(curl -fsSL https://raw.githubusercontent.com/underkraker/krakerscriptmx/main/install.sh)"
+API_KEY = "KRAKER_MASTER_ELITE"
