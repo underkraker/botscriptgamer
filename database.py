@@ -117,11 +117,23 @@ def validate_and_burn_install_key(key, ip):
         c = conn.cursor()
         c.execute("SELECT id, expiry_date, used, creator_id FROM install_keys WHERE key_code = ?", (key,))
         row = c.fetchone()
-        if row and row['used'] == 0 and row['expiry_date'] > int(time.time()):
-            c.execute("UPDATE install_keys SET used = 1, used_by_ip = ?, used_at = ? WHERE id = ?", (ip, int(time.time()), row['id']))
-            conn.commit()
-            return True, row['creator_id'], row['id']
-        return False, None, None
+        
+        if not row:
+            print(f"🕵️ [DB] Key {key} NO EXISTE en la base de datos.")
+            return False, None, None
+            
+        if row['used'] == 1:
+            print(f"🕵️ [DB] Key {key} ya fue USADA por la IP {row.get('used_by_ip', 'Desconocida')}")
+            return False, None, None
+            
+        if row['expiry_date'] < int(time.time()):
+            print(f"🕵️ [DB] Key {key} está EXPIRADA (Venció hace {int(time.time()) - row['expiry_date']} segundos).")
+            return False, None, None
+        
+        # Si todo es correcto, quemar la llave
+        c.execute("UPDATE install_keys SET used = 1, used_by_ip = ?, used_at = ? WHERE id = ?", (ip, int(time.time()), row['id']))
+        conn.commit()
+        return True, row['creator_id'], row['id']
     finally:
         conn.close()
 

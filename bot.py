@@ -42,19 +42,29 @@ def is_locked(uid, duration=0.5):
 # --- API VALIDACIÓN (Solo para Instalador) ---
 @app.route('/api/validar', methods=['GET'])
 def validar_key():
-    key = request.args.get('key')
-    # Detectar IP real si hay proxy (Nginx/Cloudflare)
+    key_raw = request.args.get('key')
+    if not key_raw: return jsonify({"status": "error", "msg": "no_key"}), 400
+    
+    # 🧹 LIMPIEZA: Quitar espacios y pasar a MAYÚSCULAS
+    key = key_raw.strip().upper()
+    
+    # Detectar IP real
     ip = request.headers.get('X-Forwarded-For', request.remote_addr).split(',')[0].strip()
     
+    print(f"🔍 [VALIDAR] Intentando key: {key} desde IP: {ip}")
+    
     is_valid, creator_id, install_id = validate_and_burn_install_key(key, ip)
+    
     if is_valid:
         creator = get_user(creator_id)
         c_username = creator['username'] if creator else "Admin"
+        print(f"✅ [ÉXITO] Key {key} validada para {c_username}")
         try:
-            bot.send_message(ADMIN_ID, f"✅ <b>NUEVA INSTALACIÓN:</b>\nKey: <code>{key}</code>\nIP: {ip}\nDueño: @{c_username}", parse_mode="HTML")
-        except Exception as e:
-            print(f"Error enviando notificación al admin: {e}")
+            bot.send_message(ADMIN_ID, f"✅ <b>INSTALACIÓN EXITOSA:</b>\nKey: <code>{key}</code>\nIP: {ip}\nDueño: @{c_username}", parse_mode="HTML")
+        except: pass
         return jsonify({"status": "success", "msg": "valid", "owner": c_username}), 200
+    
+    print(f"❌ [FALLO] Key {key} rechazada (Inválida, Usada o Expirada)")
     return jsonify({"status": "error", "msg": "invalid"}), 403
 
 def run_flask(): 
