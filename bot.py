@@ -122,37 +122,48 @@ def callback_master(call):
 
     if data == "btn_perfil":
         def run():
-            user = get_user(uid)
-            st = "👑 ADMIN" if uid == ADMIN_ID else ("🌟 VIP" if user else "👤 BASE")
-            exp = "♾️" if uid == ADMIN_ID else (datetime.fromtimestamp(user['expiry_date']).strftime("%d/%m/%Y") if user else "❌")
-            bot.send_message(chat_id, f"👤 <b>PERFIL:</b>\n📌 Status: {st}\n📅 Vence: <code>{exp}</code>", parse_mode="HTML")
+            try:
+                user = get_user(uid)
+                st = "👑 ADMIN" if uid == ADMIN_ID else ("🌟 VIP" if user else "👤 BASE")
+                exp = "♾️" if uid == ADMIN_ID else (datetime.fromtimestamp(user['expiry_date']).strftime("%d/%m/%Y") if user else "❌")
+                bot.send_message(chat_id, f"👤 <b>PERFIL:</b>\n📌 Status: {st}\n📅 Vence: <code>{exp}</code>", parse_mode="HTML")
+            except Exception as e:
+                print(f"❌ [ERROR] Fallo en btn_perfil para {uid}: {e}")
         executor.submit(run)
 
     elif data == "btn_key":
         def run():
-            if get_cached_vip(uid):
-                k, c = generate_install_key(uid)
-                u_name = html.escape(call.from_user.username or "Usuario")
-                msg = (
-                    "••••••••••••••••••••••••••••••••••••••••••••••••••••••••••\n"
-                    f"KEY {{ {c} }} DE @{u_name} con ID: {uid}\n"
-                    "⚠️ VENCE EN 4 HORAS O AL SER USADA ⚠️\n"
-                    "••••••••••••••••••••••••••••••••••••••••••••••••••••••••••\n"
-                    f"🛡️ SloganKEY 🛡️ : Klk {u_name}\n"
-                    "••••••••••••••••••••••••••••••••••••••••••••••••••••••••••\n"
-                    f"🗝️ <code>{k}</code> 🗝️\n"
-                    "•••••••••••••\n"
-                    f"🛡️ 𝙸𝚗𝚜𝚝𝚊𝚕𝚊𝚍𝚘𝚛 𝙾𝚏𝚒𝚌𝚒𝚊𝚕 {VERSION} 🔐\n"
-                    "••••••••••••••••••••••••••••••••••••••••••••••••••••••••••\n"
-                    f"<code>{INSTALL_CMD}</code>\n"
-                    "••••••••••••••••••••••••••••••••••••••••••••••••••••••••••\n"
-                    "𝙍𝙚𝙘𝙤𝙢𝙚𝙣𝙙𝙖𝙙𝙤 𝙐𝙗𝙪𝙣𝙩𝙪 20.04 LTS\n"
-                    "🧬🧬 S.O Ubuntu 18.04 a 24.04 X64 🧬🧬\n"
-                    "Debian 8 a 12 (x64)\n"
-                    "🪦 ACCESOS OFICIALES CON @underkraker\n"
-                    "••••••••••••••••••••••••••••••••••••••••••••••••••••••••••"
-                )
-                bot.send_message(chat_id, msg, parse_mode="HTML")
+            try:
+                if get_cached_vip(uid):
+                    k, c = generate_install_key(uid)
+                    u_name = html.escape(call.from_user.username or "Usuario")
+                    # Escapamos el comando para que no rompa el HTML de Telegram
+                    safe_cmd = html.escape(INSTALL_CMD)
+                    msg = (
+                        "•••••••••••••••••••••••••••••••••••••••••••••••••••••••••\n"
+                        f"KEY {{ {c} }} DE @{u_name} con ID: {uid}\n"
+                        "⚠️ VENCE EN 4 HORAS O AL SER USADA ⚠️\n"
+                        "••••••••••••••••••••••••••••••••••••••••••••••••••••••••\n"
+                        f"🛡️ SloganKEY 🛡️ : Klk {u_name}\n"
+                        "••••••••••••••••••••••••••••••••••••••••••••••••••••••••\n"
+                        f"🗝️ <code>{k}</code> 🗝️\n"
+                        "•••••••••••••\n"
+                        f"🛡️ 𝙸𝚗𝚜𝚝𝚊𝚕𝚊𝚍𝚘𝚛 𝙾𝚏𝚒𝚌𝚒𝚊𝚕 {VERSION} 🔐\n"
+                        "••••••••••••••••••••••••••••••••••••••••••••••••••••••••\n"
+                        f"<code>{safe_cmd}</code>\n"
+                        "••••••••••••••••••••••••••••••••••••••••••••••••••••••••\n"
+                        "𝙍𝙚𝙘𝙤𝙢𝙚𝙣𝙙𝙖𝙙𝙤 𝙐𝙗𝙪𝙣𝙩𝙪 20.04 LTS\n"
+                        "🧬🧬 S.O Ubuntu 18.04 a 24.04 X64 🧬🧬\n"
+                        "Debian 8 a 12 (x64)\n"
+                        "🪦 ACCESOS OFICIALES CON @underkraker\n"
+                        "••••••••••••••••••••••••••••••••••••••••••••••••••••••••"
+                    )
+                    bot.send_message(chat_id, msg, parse_mode="HTML")
+                    print(f"✅ [BOT] Key {k} enviada a {uid}")
+                else:
+                    print(f"❌ [BOT] {uid} no tiene permisos VIP para generar keys.")
+            except Exception as e:
+                print(f"❌ [ERROR] Fallo en btn_key para {uid}: {e}")
         executor.submit(run)
 
     elif data == "btn_monitor":
