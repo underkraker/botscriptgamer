@@ -193,5 +193,8 @@ if __name__ == '__main__':
     threading.Thread(target=run_flask, daemon=True).start()
     print(f"--- BOT LITE SHIELD {VERSION} ACTIVO ---")
     while True:
-        try: bot.polling(non_stop=True, interval=1, timeout=65)
-        except: time.sleep(5)
+        try:
+            bot.polling(non_stop=True, interval=1, timeout=65)
+        except Exception as e:
+            print(f"❌ Error en Polling: {e}")
+            time.sleep(5)
