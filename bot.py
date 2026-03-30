@@ -31,9 +31,11 @@ def get_cached_vip(uid):
     vip_cache[uid] = (val, now)
     return val
 
-def is_locked(uid, duration=0.7):
+def is_locked(uid, duration=0.5):
     now = time.time()
-    if uid in user_locks and now - user_locks[uid] < duration: return True
+    if uid in user_locks and now - user_locks[uid] < duration:
+        print(f"⚠️ [ANTI-SPAM] {uid} bloqueado por 0.5s")
+        return True
     user_locks[uid] = now
     return False
 
@@ -111,8 +113,10 @@ def callback_master(call):
     uid, data = call.from_user.id, call.data
     chat_id, msg_id = call.message.chat.id, call.message.message_id
     
+    print(f"📥 [BOT] Clic de {uid} (@{call.from_user.username}): {data}")
+    
     try: bot.answer_callback_query(call.id)
-    except: pass
+    except Exception as e: print(f"❌ Error answer_callback: {e}")
 
     if is_locked(uid): return
 
